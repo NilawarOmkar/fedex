@@ -2,7 +2,8 @@
 import { useState } from 'react';
 
 export default function Home() {
-  const [masterId, setMasterId] = useState('');
+  const [trackingId, setTrackingId] = useState('');
+  const [type, setType] = useState<'master' | 'single'>('master');
   const [rows, setRows] = useState<any[]>([]);
   const [error, setError] = useState('');
 
@@ -12,14 +13,28 @@ export default function Home() {
     setRows([]);
 
     try {
-      const res = await fetch('/api/track', {
+      const endpoint = type === 'master' ? '/api/track' : '/api/track-single';
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ masterTrackingNumber: masterId.trim() }),
+        body: JSON.stringify({
+          masterTrackingNumber: trackingId.trim(),
+          trackingNumber: trackingId.trim(),
+        }),
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Failed to fetch');
+
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = `${trackingId.trim()}_fedex_tracking.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(downloadUrl);
 
       const completeResults = data.output?.completeTrackResults || [];
       const temp: any[] = [];
@@ -27,19 +42,18 @@ export default function Home() {
       for (const result of completeResults) {
         const trackResults = result.trackResults || [];
         for (const track of trackResults) {
-          const trackingId = track.trackingNumberInfo?.trackingNumber || 'N/A';
+          const trackingNumber = track.trackingNumberInfo?.trackingNumber || 'N/A';
           const status = track.latestStatusDetail?.statusByLocale?.toLowerCase() || '';
-          const scanLoc = track.latestStatusDetail?.scanLocation;
-          
-          const location = status.includes('delivered')
+          const isDelivered = status.includes('delivered');
+          const location = isDelivered
             ? 'Delivered'
-            : scanLoc
-            ? `${scanLoc.city || 'Unknown'}, ${scanLoc.countryName || 'Unknown'}`
-            : 'Unknown';
-      
-          temp.push({ trackingId, location });
+            : [track.latestStatusDetail?.scanLocation?.city, track.latestStatusDetail?.scanLocation?.countryName]
+              .filter(Boolean)
+              .join(', ') || 'Unknown';
+
+          temp.push({ trackingId: trackingNumber, location });
         }
-      }    
+      }
 
       setRows(temp);
     } catch (err: any) {
@@ -48,18 +62,30 @@ export default function Home() {
     }
   };
 
+
   return (
     <main className="p-6 max-w-full">
-      <h2 className="text-xl font-semibold mb-4">Enter Master Tracking ID</h2>
-      <form onSubmit={handleSubmit} className="flex gap-4 mb-6">
+      <h2 className="text-xl font-semibold mb-4">Track FedEx Shipments</h2>
+
+      <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-4 mb-6">
+        <select
+          value={type}
+          onChange={(e) => setType(e.target.value as 'master' | 'single')}
+          className="p-2 border border-gray-300 rounded"
+        >
+          <option value="master">Master Tracking ID</option>
+          <option value="single">Single Tracking ID</option>
+        </select>
+
         <input
           type="text"
-          value={masterId}
-          onChange={(e) => setMasterId(e.target.value)}
+          value={trackingId}
+          onChange={(e) => setTrackingId(e.target.value)}
           required
-          placeholder="Enter Master Tracking Number"
+          placeholder="Enter Tracking Number"
           className="flex-grow p-2 border border-gray-300 rounded"
         />
+
         <button
           type="submit"
           className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -84,9 +110,8 @@ export default function Home() {
               <tr key={idx}>
                 <td className="border p-2">{idx + 1}</td>
                 <td
-                  className={`border p-2 ${
-                    row.trackingId === masterId.trim() ? 'font-bold text-red-600' : ''
-                  }`}
+                  className={`border p-2 ${row.trackingId === trackingId.trim() ? 'font-bold text-red-600' : ''
+                    }`}
                 >
                   {row.trackingId}
                 </td>
