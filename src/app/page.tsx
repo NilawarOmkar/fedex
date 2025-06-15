@@ -7,36 +7,34 @@ export default function Home() {
   const [rows, setRows] = useState<any[]>([]);
   const [error, setError] = useState('');
 
+  const fetchTrackingData = async () => {
+    const endpoint = type === 'master' ? '/api/track' : '/api/track-single';
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        masterTrackingNumber: trackingId.trim(),
+        trackingNumber: trackingId.trim(),
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || 'Failed to fetch');
+
+    return data;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setRows([]);
 
     try {
-      const endpoint = type === 'master' ? '/api/track' : '/api/track-single';
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          masterTrackingNumber: trackingId.trim(),
-          trackingNumber: trackingId.trim(),
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'Failed to fetch');
-
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const downloadUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = `${trackingId.trim()}_fedex_tracking.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(downloadUrl);
+      const data = await fetchTrackingData();
 
       const completeResults = data.output?.completeTrackResults || [];
+
       const temp: any[] = [];
 
       for (const result of completeResults) {
@@ -45,11 +43,16 @@ export default function Home() {
           const trackingNumber = track.trackingNumberInfo?.trackingNumber || 'N/A';
           const status = track.latestStatusDetail?.statusByLocale?.toLowerCase() || '';
           const isDelivered = status.includes('delivered');
+          const description = track.latestStatusDetail?.description || '';
+          const locationParts = [
+            track.latestStatusDetail?.scanLocation?.city,
+            track.latestStatusDetail?.scanLocation?.countryName,
+          ].filter(Boolean);
+
           const location = isDelivered
             ? 'Delivered'
-            : [track.latestStatusDetail?.scanLocation?.city, track.latestStatusDetail?.scanLocation?.countryName]
-              .filter(Boolean)
-              .join(', ') || 'Unknown';
+            : (locationParts.join(', ') || 'Unknown') + (description ? ` — ${description}` : '');
+
 
           temp.push({ trackingId: trackingNumber, location });
         }
@@ -58,10 +61,26 @@ export default function Home() {
       setRows(temp);
     } catch (err: any) {
       console.error(err);
-      setError('Error fetching tracking data.');
+      setError(err.message || 'Error fetching tracking data.');
     }
   };
 
+  const handleDownload = async () => {
+    try {
+      const data = await fetchTrackingData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tracking-${trackingId.trim() || 'result'}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error(err);
+      alert('Failed to download JSON: ' + (err.message || 'Unknown error'));
+    }
+  };
 
   return (
     <main className="p-6 max-w-full">
@@ -91,6 +110,14 @@ export default function Home() {
           className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
         >
           Fetch
+        </button>
+
+        <button
+          type="button"
+          onClick={handleDownload}
+          className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+        >
+          Download JSON
         </button>
       </form>
 
